@@ -1,0 +1,377 @@
+---
+title: "Boğaziçi University"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### IE 423 - Project Part-1
+
+#### 2023-11-02
+
+###### Nergiz Selin Angın - 2018402117
+
+###### İlayda Küçükafacan - 2018402120
+
+###### Ege Tuna Diken - 2020402282
+
+<br>
+
+#### 1. Introduction
+This report presents a comprehensive analysis of the stock data from six diverse companies: Akbank, Aygaz, Banvit, Coca Cola, Şişecam Group, and Yapi Kredi. Utilizing box-plots for visual representation, we evaluated their monthly stock performances and identified outliers through two distinct methods, with the refined second method pinpointing 21 specific outlier months. Furthermore, we incorporated Google Trends data to explore potential correlations between online popularity and stock prices.  
+    
+  
+  
+#### 2. Library Loading
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ggplot2) 
+library(lubridate) 
+library(dplyr) 
+library(gtrendsR) 
+```
+<br>
+
+#### 3. Data Import
+```{r}
+file_path <- "/Users/selinangin/Desktop/IE 423/Project Part 1/all_ticks_long.csv.gz"
+my_data <- read.csv(gzfile(file_path), header = TRUE)
+```
+<br>
+
+#### 4. Selecting Six Stocks to Anlayze
+```{r echo=TRUE, warning=FALSE, results = 'hide'}
+# Check the first few rows of the data 
+head(my_data)
+# Get unique short_name values
+unique_names <- unique(my_data$short_name)
+# Display at least the first 200 unique short_names 
+head(unique_names, 200)
+# List of companies to check
+companies <- c("AKBNK", "AYGAZ", "BANVT", "CCOLA", "SISE", "YKBNK")
+# Convert the timestamp to a date-time object
+my_data$timestamp <- as.POSIXct(my_data$timestamp, format="%Y- %m-%dT%H:%M:%SZ")
+# Extract year and month from the timestamp 
+my_data$year_month <- format(my_data$timestamp, "%Y-%m")
+filtered_data <- subset(my_data, short_name %in% companies)
+```
+<br>
+Akbank, Aygaz, Banvit, Coca Cola, Şişecam Group, and Yapi Kredi have been meticulously selected for the analysis, representing a diverse array of sectors including the financial, energy, food, beverage, industrial, and again, financial sectors respectively. 
+<br>
+<br>
+
+#### 5. Monthly Box-Plots of the Selected Six Stocks
+```{r}
+# Generate separate boxplots for each company using facet_wrap 
+ggplot(filtered_data, aes(x=year_month, y=price)) +
+geom_boxplot(outlier.color="red", outlier.shape=16, outlier.size=2) + theme_minimal() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) +theme(axis.text.y = element_text( size = 5))+ facet_wrap(~ short_name, scales="free_y", ncol=1) + labs(title="Monthly Stock Prices by Company")
+
+```
+<br>
+
+#### 6. Outliers of the Data  
+<br>
+
+##### 6.1. First Approach
+
+```{r}
+# Calculate outliers using IQR for each company and month 
+outliers_data <- filtered_data %>%
+group_by(short_name, year_month) %>% mutate(Q1 = quantile(price, 0.25),
+Q3 = quantile(price, 0.75),
+IQR = Q3 - Q1,
+lower_bound = Q1 - 1.5 * IQR, upper_bound = Q3 + 1.5 * IQR) %>%
+filter(price < lower_bound | price > upper_bound) %>% ungroup()
+print(outliers_data)
+```
+<br>
+The initial approach produced a massive set of 5499 outlier rows through a row-by-row analysis, which ultimately proved inefficient. To address this inefficiency, a second method is implemented. It centers around calculating the monthly means. This approach streamlines the process, allowing us to identify outliers based on these monthly averages, which provides a more concise and effective means of analysis.
+<br>
+<br>
+
+##### 6.2. Second Approach
+
+```{r}
+# Calculate monthly means for the selected companies 
+monthly_means <- filtered_data %>%
+group_by(short_name, year_month) %>% summarize(monthly_mean = mean(price), .groups = "drop")
+# Add a 'year' column to the monthly_means data 
+monthly_means$year <- as.integer(format(as.Date(monthly_means$year_month, format = "%Y- %m"), "%Y"))
+# Compute the annual statistics for each company 
+annual_stats <- monthly_means %>%
+group_by(short_name, year) %>% summarise(annual_mean = mean(monthly_mean),
+Q1 = quantile(monthly_mean, 0.25),
+Q3 = quantile(monthly_mean, 0.75),
+IQR = Q3 - Q1,
+lower_bound = annual_mean - 1.5 * IQR, upper_bound = annual_mean + 1.5 * IQR, .groups = "drop")
+# Determine outlier months for each company and year based on the computed bounds
+outlier_months <- monthly_means %>%
+left_join(annual_stats, by = c("short_name", "year")) %>%
+filter(monthly_mean < lower_bound | monthly_mean > upper_bound) %>%
+select(short_name, year_month, monthly_mean)
+print(outlier_months, n=nrow(outlier_months))
+
+```
+<br>
+Using the second method, the table above successfully highlights 21 months that have been identified as outliers.
+<br>
+
+Displayed below are the plots representing the monthly average values for each company. These visual representations facilitate an easy examination of outlier months on a company-by-company basis, ensuring a comprehensive understanding of the data.
+<br>
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+ggplot(monthly_means, aes(x=year_month, y=monthly_mean)) + geom_line(aes(color=short_name), size=1) + geom_point(aes(color=short_name), size=1) + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=5)) + theme(axis.text.y = element_text( size = 5)) + facet_wrap(~ short_name, scales="free_y", ncol=1) + labs(title="Monthly Average Stock Prices by Company", y="Average
+Price")
+```
+<br>
+<br>
+
+#### 7. Insights with Google Trends Data 
+
+<br>
+
+##### 7.1. Akbank
+```{r}
+# Fetching Google Trends data for "Akbank" for the given time frame in Turkey
+gtrends_result <- gtrends("Akbank", geo = "TR", time = "2012-01-01 2023-01-01")
+names(gtrends_result)
+```
+The gtrends() function is a powerful tool for extracting Google Trends data, and it generates several data frames, each capturing different facets of the search term’s online popularity. When exploring the search term "Akbank," this function provides us with "Interest Over Time," illustrating the term's popularity trends within a designated time frame; "Interest by Country," mapping out the search term’s global appeal; "Interest by Region," offering a detailed look at its popularity within specific regions of a country; "Interest by DMA" (Designated Market Area), which is particularly pertinent for analyses within the U.S.; "Interest by City," narrowing down the popularity to city-level data; and "Related Topics," showcasing topics associated with "Akbank." For the purpose of our report, we are channeling our focus primarily on the "Interest Over Time" data frame, as it directly aligns with our goal to dissect and understand the chronological fluctuations in the popularity of "Akbank".
+
+
+```{r}
+akbank_trends <- gtrends_result$interest_over_time
+# Akbank google trends plot 
+ggplot(data = akbank_trends) +
+geom_line(aes(x = date, y = hits), color = "blue", size = 1) + labs(title = "Google Trends Search Volume for 'Akbank'", x = "Date",  y = "Search Volume") +
+theme_minimal()
+
+monthly_means$year_month <- as.Date(paste0(monthly_means$year_month, "-01"), format = "%Y-%m- %d")
+akbank_stock_data <- monthly_means[monthly_means$short_name == "AKBNK", ]
+akbank_trends$date <- as.Date(paste0(akbank_trends$date, "-01"), format = "%Y-%m-%d")
+
+# Merge the data frames
+merged_data <- merge(akbank_trends, akbank_stock_data, by.x = "date", by.y = "year_month", all = TRUE)
+filtered_data <- merged_data[!is.na(merged_data$short_name), ]
+
+# Create a line plot for hits (Google Trends) and monthly_mean (Stock data)
+ggplot(data = filtered_data) +
+  geom_line(aes(x = date, y = hits, color = "Google Trends"), size = 1) +
+  geom_line(aes(x = date, y = monthly_mean, color = "Stock Data"), size = 1) +
+  labs(title = "Google Trends vs. Stock Data for 'Akbank'", x = "Date",
+       y = "Value") +
+  scale_color_manual(values = c("Google Trends" = "blue", "Stock Data" =
+                                  "red")) + theme_minimal()
+
+```
+<br>
+The graphical representation clearly elucidates the relationship between the search volume for "Akbank" and its corresponding stock prices, especially when the declining trend in Google Trends data is factored out. The plot distinctly showcases periods of strong correlation, particularly noticeable during the first half of 2013, early 2014, late 2014, early 2015, and the onset of 2017. Additionally, the decline in Akbank's stock prices observed in 2018 is also reflected in the Google Trends data with a slight delay. During these specific intervals, the movements in search volume align closely with the stock price fluctuations, highlighting a compelling synchronicity between public interest as reflected in online searches and the financial performance of Akbank.
+<br>
+<br>
+
+##### 7.2. Aygaz
+```{r}
+# Fetching Google Trends data for "Aygaz" for the given timeframe in Turkey
+gtrends_result2 <- gtrends("Aygaz", geo = "TR", time = "2012-01-01 2023-01-01")
+
+
+aygaz_trends <- gtrends_result2$interest_over_time
+
+# Aygaz google trends plot 
+ggplot(data = aygaz_trends) +
+  geom_line(aes(x = date, y = hits), color = "blue", size = 1) + labs(title = "Google Trends Search Volume for 'Aygaz'", x = "Date",    y = "Search Volume") +
+  theme_minimal()
+
+monthly_means$year_month <- as.Date(paste0(monthly_means$year_month, "-01"), format = "%Y-%m- %d")
+aygaz_stock_data <- monthly_means[monthly_means$short_name == "AYGAZ", ]
+aygaz_trends$date <- as.Date(paste0(aygaz_trends$date, "-01"), format = "%Y-%m-%d")
+
+
+# Merge the data frames
+merged_data <- merge(aygaz_trends, aygaz_stock_data, by.x = "date", by.y = "year_month", all = TRUE)
+filtered_data <- merged_data[!is.na(merged_data$short_name), ]
+
+# Create a line plot for hits (Google Trends) and monthly_mean (Stock data)
+ggplot(data = filtered_data) +
+  geom_line(aes(x = date, y = hits, color = "Google Trends"), size = 1) +
+  geom_line(aes(x = date, y = monthly_mean, color = "Stock Data"), size = 1) +
+  labs(title = "Google Trends vs. Stock Data for 'Aygaz'", x = "Date",
+       y = "Value") +
+  scale_color_manual(values = c("Google Trends" = "blue", "Stock Data" =
+                                  "red")) + theme_minimal()
+
+```
+<br>
+The plot above shows that, despite the greater volatility observed in the trends data, there is a noticeable reflection of stock data fluctuations within the trend data, albeit occurring with a certain delay. This lag is evident when we observe the stock data’s decline at the onset of 2016, its subsequent peak in the first half of 2017, and the noticeable decline in the first half of 2018—all of which are captured by the trends data. 
+<br>
+<br>
+
+##### 7.3. Banvit
+```{r}
+# This will fetch Google Trends data for "Banvit" for the given timeframe in Turkey
+gtrends_result3 <- gtrends("Banvit", geo = "TR", time = "2012-01-01 2023-01-01")
+
+# This section is for the interest over time only.
+banvit_trends <- gtrends_result3$interest_over_time
+# Banvit Google Trends plot
+ggplot(data = banvit_trends) +
+  geom_line(aes(x = date, y = hits), color = "blue", size = 1) + labs(title = "Google Trends Search Volume for 'Banvit'",
+                                                                      x = "Date",
+                                                                      y = "Search Volume") +
+  theme_minimal()
+
+monthly_means$year_month <- as.Date(paste0(monthly_means$year_month, "-01"), format = "%Y-%m-%d")
+banvit_stock_data <- monthly_means[monthly_means$short_name == "BANVT", ]
+banvit_trends$date <- as.Date(paste0(banvit_trends$date, "-01"), format = "%Y-%m-%d")
+
+# Merge the data frames
+merged_data <- merge(banvit_trends, banvit_stock_data, by.x = "date", by.y = "year_month", all = TRUE)
+filtered_data <- merged_data[!is.na(merged_data$short_name), ]
+
+library(ggplot2)
+# Create a line plot for hits (Google Trends) and monthly_mean (Stock data)
+ggplot(data = filtered_data) +
+  geom_line(aes(x = date, y = hits, color = "Google Trends"), size = 1) +
+  geom_line(aes(x = date, y = monthly_mean, color = "Stock Data"), size = 1) +
+  labs(title = "Google Trends vs. Stock Data for 'Banvit'", x = "Date",
+       y = "Value") +
+  scale_color_manual(values = c("Google Trends" = "blue", "Stock Data" =
+                                  "red")) + theme_minimal()
+
+```
+<br>
+The graph provides a compelling visual representation, demonstrating that once the three major peaks in Google Trends are omitted, a significant correlation between trend data and stock prices becomes evident. Notably, this correlation is particularly strong from mid-2017 onward, with both sets of data following a closely aligned trajectory. This observation suggests that, aside from sporadic spikes in search volume, trend data has the potential to mirror stock price movements, offering valuable insights into market behavior.
+<br>
+<br>
+
+##### 7.4.  Coca Cola
+```{r}
+# This will fetch Google Trends data for "CCola" for the given timeframe in Turkey
+gtrends_result4 <- gtrends("Coca Cola", geo = "TR", time = "2012-01-01 2023-01-01")
+
+# This section is for the interest over time only.
+ccola_trends <- gtrends_result4$interest_over_time
+# CCola Google Trends plot
+ggplot(data = ccola_trends) +
+  geom_line(aes(x = date, y = hits), color = "blue", size = 1) + labs(title = "Google Trends Search Volume for 'Coca Cola'",
+                                                                      x = "Date",
+                                                                      y = "Search Volume") +
+  theme_minimal()
+
+monthly_means$year_month <- as.Date(paste0(monthly_means$year_month, "-01"), format = "%Y-%m-%d")
+ccola_stock_data <- monthly_means[monthly_means$short_name == "CCOLA", ]
+ccola_trends$date <- as.Date(paste0(ccola_trends$date, "-01"), format = "%Y-%m-%d")
+
+# Merge the data frames
+merged_data <- merge(ccola_trends, ccola_stock_data, by.x = "date", by.y = "year_month", all = TRUE)
+filtered_data <- merged_data[!is.na(merged_data$short_name), ]
+
+library(ggplot2)
+# Create a line plot for hits (Google Trends) and monthly_mean (Stock data)
+ggplot(data = filtered_data) +
+  geom_line(aes(x = date, y = hits, color = "Google Trends"), size = 1) +
+  geom_line(aes(x = date, y = monthly_mean, color = "Stock Data"), size = 1) +
+  labs(title = "Google Trends vs. Stock Data for 'CCola'", x = "Date",
+       y = "Value") +
+  scale_color_manual(values = c("Google Trends" = "blue", "Stock Data" =
+                                  "red")) + theme_minimal()
+
+
+```
+<br>
+In the above graph, upon normalizing the major peaks within the Google Trends data to create a smoother representation, it is observed that the relationship between trends data and stock price appears to remain consistent. Despite the adjustments made to the data, the underlying trend suggests that there is still a noteworthy correspondence between the fluctuations in search volume and stock prices. This implies that the observed relationship is not solely dependent on the extreme values, reinforcing the potential relevance of Google Trends data in analyzing stock market movements.  
+
+##### 7.5. Şişecam Group   
+
+```{r}
+
+# This will fetch Google Trends data for "Sise" for the given timeframe in Turkey
+gtrends_result5 <- gtrends("Sise", geo = "TR", time = "2012-01-01 2023-01-01")
+
+# This section is for the interest over time only.
+sise_trends <- gtrends_result5$interest_over_time
+# Sise Google Trends plot
+ggplot(data = sise_trends) +
+  geom_line(aes(x = date, y = hits), color = "blue", size = 1) + labs(title = "Google Trends Search Volume for 'Sise'",
+                                                                      x = "Date",
+                                                                      y = "Search Volume") +
+  theme_minimal()
+
+monthly_means$year_month <- as.Date(paste0(monthly_means$year_month, "-01"), format = "%Y-%m-%d")
+sise_stock_data <- monthly_means[monthly_means$short_name == "SISE", ]
+sise_trends$date <- as.Date(paste0(sise_trends$date, "-01"), format = "%Y-%m-%d")
+
+# Merge the data frames
+merged_data <- merge(sise_trends, sise_stock_data, by.x = "date", by.y = "year_month", all = TRUE)
+filtered_data <- merged_data[!is.na(merged_data$short_name), ]
+
+library(ggplot2)
+# Create a line plot for hits (Google Trends) and monthly_mean (Stock data)
+ggplot(data = filtered_data) +
+  geom_line(aes(x = date, y = hits, color = "Google Trends"), size = 1) +
+  geom_line(aes(x = date, y = monthly_mean, color = "Stock Data"), size = 1) +
+  labs(title = "Google Trends vs. Stock Data for 'Sise'", x = "Date",
+       y = "Value") +
+  scale_color_manual(values = c("Google Trends" = "blue", "Stock Data" =
+                                  "red")) + theme_minimal()
+
+```
+<br>
+The graph above clearly illustrates a synchronous movement between the increasing trends of Google Trends data and stock data, showcasing their alignment over time. Furthermore, it is apparent that the fluctuations experienced in 2018, especially, are mirrored in the trend data with a noticeable delay. This lag in response within the Google Trends data highlights the potential time-shifted relationship between public interest, as reflected in search volumes, and stock price movements.
+<br>
+<br>
+
+##### 7.6.  Yapi Kredi
+```{r}
+# This will fetch Google Trends data for "Ykbnk" for the given timeframe in Turkey
+gtrends_result6 <- gtrends("Ykbnk", geo = "TR", time = "2012-01-01 2023-01-01")
+
+# This section is for the interest over time only.
+ykbnk_trends <- gtrends_result6$interest_over_time
+# Ykbnk Google Trends plot
+ggplot(data = ykbnk_trends) +
+  geom_line(aes(x = date, y = hits), color = "blue", size = 1) + labs(title = "Google Trends Search Volume for 'Ykbnk'",
+                                                                      x = "Date",
+                                                                      y = "Search Volume") +
+  theme_minimal()
+
+monthly_means$year_month <- as.Date(paste0(monthly_means$year_month, "-01"), format = "%Y-%m-%d")
+ykbnk_stock_data <- monthly_means[monthly_means$short_name == "YKBNK", ]
+ykbnk_trends$date <- as.Date(paste0(ykbnk_trends$date, "-01"), format = "%Y-%m-%d")
+
+# Merge the data frames
+merged_data <- merge(ykbnk_trends, ykbnk_stock_data, by.x = "date", by.y = "year_month", all = TRUE)
+filtered_data <- merged_data[!is.na(merged_data$short_name), ]
+
+library(ggplot2)
+# Create a line plot for hits (Google Trends) and monthly_mean (Stock data)
+ggplot(data = filtered_data) +
+  geom_line(aes(x = date, y = hits, color = "Google Trends"), size = 1) +
+  geom_line(aes(x = date, y = monthly_mean, color = "Stock Data"), size = 1) +
+  labs(title = "Google Trends vs. Stock Data for 'Ykbnk'", x = "Date",
+       y = "Value") +
+  scale_color_manual(values = c("Google Trends" = "blue", "Stock Data" =
+                                  "red")) + theme_minimal()
+
+```
+<br>
+By disregarding the significant peak in Trends data from 2018, which could be attributed to a variety of factors unrelated to stock price, we can observe a correlation between stock price and trends data. Although the relationship is not perfect, the remaining data suggests that there is indeed a noteworthy association between the two, highlighting the potential for Google Trends data to offer insights into stock price movements when external anomalies are accounted for.
+<br>
+<br>
+
+#### 8. Conclusion
+
+The findings reveals a nuanced relationship between search volumes and stock prices, highlighting a tentative yet noticeable connection. While the correlation is not absolute, it is evident that stock prices are more directly influenced by major corporate events. Following these significant occurrences, there appears to be a delayed effect on Google Trends data, indicating that public interest and online searches respond to shifts in stock prices rather than precede them.  
+
+
+#### 9. References  
+
+ChatGPT Conversation:
+<br>
+https://chat.openai.com/share/be667f96-e4b9-47cd-bf1e-cfccc8fbc2a6
+
+
+
